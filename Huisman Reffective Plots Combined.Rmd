@@ -1,0 +1,641 @@
+---
+title: "Sewershed Test R_Eff"
+output: html_document
+date: "2024-02-20"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+rm(list=ls())
+library(MASS)
+library(devtools)
+install_github("covid-19-Re/estimateR")
+library(estimateR)
+library(scales)
+library(xts)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+```
+
+```{r}
+########################################################
+        ## WASTEWATER DATA - O'Brien WWTP ##
+########################################################
+
+#Loading in the Data Set
+library(haven)
+Obrien_Data_for_Reff <- read_dta("~/Desktop/Desktop - Kyle’s MacBook Pro (2)/CDPH - UChicago Project Work/Publicly Available Data/Reffective Data/odatanew.dta")
+odata <- Obrien_Data_for_Reff
+
+############################
+##Data Cleaning code from STATA
+############################
+
+## 1. Addressing measures at or below the LOD
+#replace sars_cov_2 = 2040 if sars_cov_2<=4080
+#tabstat sars_cov_2, s(n mean sd median min max)
+
+##2. Collapsing Dates with multiple observations
+#collapse (mean) sars_cov_2 method, by(sample_collect_date)
+
+## 2. Addressing Potential Outlying Points
+#gen modcovid = sars_cov_2
+#replace modcovid = . if sars_cov_2 >= (234164.7 + (3*274649.7)) // (mean conc + 3*SD)
+
+## 2. Generating Incidence Estimate
+	#230 million gallons/day on average = 870644710.32 L/day on average
+	#1,263,110 is the estimated population size of the catchment area
+#gen personconc = (modcovid*870644710.32)/1263110 
+#tabstat personconc, s(n mean  median min max)
+
+	##1406145 is the minimum value in the set; assume to be 1 infection event according to paper
+#gen inc_est = personconc/1406145
+#tabstat inc_est, s(n mean  median min max)
+
+subset_odata <- subset(odata, sample_collect_date >= "2022-02-23") #Sub-setting the data for AFTER method switch for WW sampling
+odata <- subset_odata
+
+##Plotting Inc Estimates
+odata$sample_collect_date <- as.Date(odata$sample_collect_date, format = "%Y-%m-%d")
+
+plot(odata$sample_collect_date, odata$inc_est, 
+     xlab = "Date", ylab = "Incidence", 
+     main = "O'Brien WWTP", pch=20)
+```
+
+```{r}
+##1) Visualizing Smoothing
+loess_fit <- loess(inc_est ~ as.numeric(odata$sample_collect_date), data = odata, family = c("symmetric"), span = 0.4)
+loess_points <- predict(loess_fit, data.frame(date = odata$sample_collect_date))
+
+
+plot(odata$sample_collect_date, odata$inc_est, 
+     xlab = "Date", ylab = "Incidence", log="y", 
+     main = "O'Brien WWTP", pch=20)
+lines(odata$sample_collect_date, loess_points, col = "red", lwd = 3)
+
+
+```
+
+```{r}
+#2) Creating variable with even time step for interpolation and use for Reff calculation
+
+odata$sample_collect_date <- as.Date(odata$sample_collect_date, format = "%Y-%m-%d")
+existing_xts <- xts(odata$inc_est, order.by = odata$sample_collect_date)
+
+# Create a sequence of dates with one-day steps
+all_dates <- seq(start(existing_xts), end(existing_xts), by = "1 day")
+
+# Merge the existing data with the sequence of dates
+merged_xts <- merge(existing_xts, xts(rep(NA, length(all_dates)), order.by = all_dates))
+result_df <- data.frame(date = index(merged_xts), value = coredata(merged_xts))
+
+names(odata)[names(odata) == "sample_collect_date"] <- "date"
+merged_data <- merge(odata, result_df, by = "date", all.x = TRUE, all = TRUE)
+odata <- merged_data
+
+```
+
+
+```{r}
+##3) Interpolating Incidence and Smoothing
+odata$interpolated_incidence_data <- na.approx(odata$inc_est) ##interpolating missing values
+
+smoothed_covid_incidence <- smooth_incidence(
+  incidence_data = as.numeric(odata$interpolated_incidence_data),
+  smoothing_method = "LOESS"
+)
+
+```
+
+
+```{r}
+
+##4) Deconvolution (as described in the paper)
+
+#gamma distributions derived from Benefield for SLD
+##From symptom onset to shedding
+meansts <- 6.7 
+sdsts <- 7.0 
+shapests <- (meansts/sdsts)^2
+scalests <- (sdsts^2/meansts)
+STSgamma <- list(name="gamma", shape = shapests, scale = scalests)
+
+##Incubation Period (infection to symptom onset)
+meanI <- 5.3 
+sdI <- 3.2 
+shapeI <- (meanI/sdI)^2
+scaleI <- (sdI^2/meanI)
+Igamma <- list(name="gamma", shape = shapeI, scale = scaleI)
+
+
+
+infection_events <- deconvolve_incidence(
+  incidence_data = smoothed_covid_incidence,
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  delay = list(STSgamma, Igamma)
+)
+
+```
+
+```{r}
+##5) Reff Calculation
+
+date_first_data_point <- as.Date("2022-02-23")
+
+##Serial Interval
+mean_serial_interval = 3.96
+std_serial_interval = 4.75
+
+
+#Estimation Window - Affects Smoothing
+estimation_window = 21 
+covid_estimates <- estimate_Re_from_noisy_delayed_incidence(as.numeric(odata$interpolated_incidence_data),
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval  = std_serial_interval,
+  output_Re_only = FALSE,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+head(covid_estimates)
+```
+
+
+```{r}
+##6. R_eff estimation plotting 
+covid_estimates$date <- as.Date(covid_estimates$date, format = "%Y-%m-%d")
+odata$date <- as.Date(odata$date, format = "%Y-%m-%d")
+
+plot(covid_estimates$date, covid_estimates$Re_estimate, 
+     xlab = "Date", ylab = "Reff", 
+     main = "O'Brien WWTP", pch=20, type ="l"   
+     )
+abline(h = 1, col = "red", lty = 2)
+
+```
+
+```{r}
+## 7. Uncertainty Estimation
+
+N_bootstrap_replicates <- 100
+
+coviduncertaintyestimates <- get_block_bootstrapped_estimate(odata$interpolated_incidence_data,
+  N_bootstrap_replicates = N_bootstrap_replicates,
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  uncertainty_summary_method = "original estimate - CI from bootstrap estimates",
+  combine_bootstrap_and_estimation_uncertainties = TRUE,
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval = std_serial_interval,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+#Plot of all data
+plot1 <- ggplot(coviduncertaintyestimates, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  ggtitle("O'Brien WWTP Reff Estimates") +
+  theme_bw()
+
+print(plot1)
+
+```
+
+
+```{r}
+########################################################
+    ## TEST HOSPITALIZATIONS DATA - Hospitalizations ##
+########################################################
+library(haven)
+hdata2 <- read_dta("~/Desktop/Desktop - Kyle’s MacBook Pro (2)/CDPH - UChicago Project Work/Publicly Available Data/Code for Reproducing CDPH Plots/hdata.dta")
+
+hdata2 <- hdata2[-1447, ] ##one observation with missing date
+hdata2$date <- as.Date(hdata2$date, format = "%m/%d/%Y", errors = "coerce")
+
+plot(hdata2$date, hdata2$hospitalizationstotal, 
+     xlab = "Date", ylab = "Incidence", 
+     main = "Hospitalizations Total", pch=20)
+
+```
+
+```{r}
+##1) Visualizing Smoothing
+hdata2 <- hdata2[order(hdata2$date), ] ##Ordering by Date so that LOESS line fits properly
+hdata2$numeric_date <- as.numeric(hdata2$date)
+
+loess_fit <- loess(hospitalizationstotal ~ numeric_date, data = hdata2, family = c("symmetric"), span = 0.3)
+newdata <- data.frame(numeric_date = as.numeric(hdata2$date))
+loess_points <- predict(loess_fit, newdata = newdata)
+
+march22onward <- subset(hdata2, date >= as.Date("2022-03-01"))
+
+# Plot
+plot(hdata2$date, hdata2$hospitalizationstotal, 
+     xlab = "Date", ylab = "Cases",
+     log = "y",
+     main = "Hospitalizations Total", pch = 20)
+lines(hdata2$date, loess_points, col = "red", lwd = 3)
+
+plot(march22onward$date, march22onward$hospitalizationstotal, 
+     xlab = "Date", ylab = "Cases", 
+     main = "Hospitalizations Total", pch = 20)
+lines(hdata2$date, loess_points, col = "red", lwd = 3)
+
+
+```
+
+
+```{r}
+##2) Smoothing
+hdata2sub <- hdata2[!is.na(hdata2$hospitalizationstotal), ]
+hdata2 <- hdata2sub
+
+smoothed_covid_incidence <- smooth_incidence(
+  incidence_data = as.numeric(hdata2$hospitalizationstotal),
+  smoothing_method = "LOESS"
+)
+
+```
+
+
+```{r}
+##3) Deconvolution
+
+#gamma distributions from ANL code
+##From Infection to symptoms
+alphaIS <- 5.807 #days
+thetaIS <- 0.948 #days
+ISgamma <- list(name="gamma", shape = alphaIS, scale = thetaIS)
+
+##Symptoms to Hospitalization
+alphaH <- 1.104 #days
+thetaH <- 5.074 #days
+Hgamma <- list(name="gamma", shape = alphaH, scale = thetaH)
+
+infection_events <- deconvolve_incidence(
+  incidence_data = smoothed_covid_incidence,
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  delay = list(ISgamma, Hgamma)
+)
+
+```
+
+
+
+```{r}
+##4) Reff Calculation
+
+date_first_data_point <- as.Date("2020-03-01")
+
+##Serial Interval
+mean_serial_interval = 3.96
+std_serial_interval = 4.75
+
+
+#Estimation Window - Effects Smoothing
+estimation_window = 21
+
+covid_estimates2 <- estimate_Re_from_noisy_delayed_incidence(as.numeric(hdata2$hospitalizationstotal),
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  delay = list(ISgamma, Hgamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval  = std_serial_interval,
+  output_Re_only = FALSE,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+head(covid_estimates2)
+```
+
+
+```{r}
+##5. R_eff estimation plotting 
+covid_estimates2$date <- as.Date(covid_estimates2$date, format = "%Y-%m-%d")
+hdata2$date <- as.Date(hdata2$date, format = "%Y-%m-%d")
+
+plot(covid_estimates2$date, covid_estimates2$Re_estimate, 
+     xlab = "Date", ylab = "Reff", 
+     main = "Reff Hospitalizations Total", pch=20, type ="l"   
+     )
+abline(h = 1, col = "red", lty = 2)
+
+```
+
+```{r}
+## 6. Uncertainty Estimation
+
+N_bootstrap_replicates <- 100
+
+coviduncertaintyestimates2 <- get_block_bootstrapped_estimate(as.numeric(hdata2$hospitalizationstotal),
+  N_bootstrap_replicates = N_bootstrap_replicates,
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  uncertainty_summary_method = "original estimate - CI from bootstrap estimates",
+  combine_bootstrap_and_estimation_uncertainties = TRUE,
+  delay = list(ISgamma, Hgamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval = std_serial_interval,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+#Plot of all data
+plot2 <- ggplot(coviduncertaintyestimates2, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  theme_bw()
+
+print(plot2)
+```
+
+```{r}
+########################################################
+    ## TEST HOSPITALIZATIONS DATA - Cases Total ##
+########################################################
+plot(hdata2$date, hdata2$casestotal, 
+     xlab = "Date", ylab = "Incidence", 
+     main = "Total Cases", pch=20)
+
+loess_fit <- loess(casestotal ~ numeric_date, data = hdata2, family = c("symmetric"), span = 0.3)
+newdata <- data.frame(numeric_date = as.numeric(hdata2$date))
+loess_points <- predict(loess_fit, newdata = newdata)
+
+
+# Plot
+plot(hdata2$date, hdata2$casestotal, 
+     xlab = "Date", ylab = "Cases",
+    log = "y",
+     main = "Cases Total", pch = 20)
+lines(hdata2$date, loess_points, col = "red", lwd = 3)
+
+plot(march22onward$date, march22onward$casestotal, 
+     xlab = "Date", ylab = "Cases", 
+     main = "Cases Total", pch = 20)
+lines(hdata2$date, loess_points, col = "red", lwd = 3)
+
+```
+
+
+```{r}
+##2) Smoothing
+smoothed_covid_incidence <- smooth_incidence(
+  incidence_data = as.numeric(hdata2$casestotal),
+  smoothing_method = "LOESS"
+)
+
+```
+
+```{r}
+##3) Deconvolution
+
+#gamma distributions from ANL code
+##From Infection to symptoms
+alphaIS <- 5.807 
+thetaIS <- 0.948 
+ISgamma <- list(name="gamma", shape = alphaIS, scale = thetaIS)
+
+##Testing Period - From Marschner
+alphacase <- 1.2
+thetacase <- (1/0.6)
+Cgamma <- list(name="gamma", shape = alphacase, scale = thetacase)
+
+infection_events <- deconvolve_incidence(
+  incidence_data = smoothed_covid_incidence,
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  delay = list(ISgamma, Hgamma)
+)
+```
+
+```{r}
+##4) Reff Calculation
+date_first_data_point <- as.Date("2020-03-01")
+
+##Serial Interval
+mean_serial_interval = 3.96
+std_serial_interval = 4.75
+
+
+#Estimation Window - Effects Smoothing
+estimation_window = 21 
+
+covid_estimates3 <- estimate_Re_from_noisy_delayed_incidence(as.numeric(hdata2$casestotal),
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  delay = list(ISgamma, Cgamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval  = std_serial_interval,
+  output_Re_only = FALSE,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+```
+
+
+```{r}
+##5. R_eff estimation plotting 
+covid_estimates3$date <- as.Date(covid_estimates3$date, format = "%Y-%m-%d")
+hdata2$date <- as.Date(hdata2$date, format = "%Y-%m-%d")
+
+plot(covid_estimates3$date, covid_estimates3$Re_estimate, 
+     xlab = "Date", ylab = "Reff", 
+     main = "Reff Total Cases", pch=20, type ="l"   
+     )
+abline(h = 1, col = "red", lty = 2)
+
+```
+
+```{r}
+## 6. Uncertainty Estimation
+
+N_bootstrap_replicates <- 100
+
+coviduncertaintyestimates3 <- get_block_bootstrapped_estimate(as.numeric(hdata2$casestotal),
+  N_bootstrap_replicates = N_bootstrap_replicates,
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  uncertainty_summary_method = "original estimate - CI from bootstrap estimates",
+  combine_bootstrap_and_estimation_uncertainties = TRUE,
+  delay = list(ISgamma, Cgamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval = std_serial_interval,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+#Plot of all data
+plot3 <- ggplot(coviduncertaintyestimates3, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  theme_bw()
+
+print(plot3)
+
+##Plot of 2023 and Onward  
+subset_2023 <- subset(coviduncertaintyestimates3, date >= "2021-05-01" & date <= "2023-11-01")
+ggplot(subset_2023, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  theme_bw()
+```
+
+```{r}
+########################################################
+  ## PLOTTING WW v HOSPITALIZATIONS v TOTAL CASES ##
+########################################################
+
+coviduncertaintyestimates$date <- as.Date(coviduncertaintyestimates$date)
+coviduncertaintyestimates2$date <- as.Date(coviduncertaintyestimates2$date)
+coviduncertaintyestimates3$date <- as.Date(coviduncertaintyestimates3$date)
+
+# Combine the datasets and create a grouping variable
+combined_data <- rbind(
+  mutate(coviduncertaintyestimates, Group = "O'Brien WWTP"),
+  mutate(coviduncertaintyestimates2, Group = "Hospitalizations Data"),
+  mutate(coviduncertaintyestimates3, Group = "Total Cases Data")
+)
+
+subset_combined <- subset(combined_data, date >= "2021-09-01")
+
+group_colors <- c("Hospitalizations Data" = "red", "Total Cases Data" = "blue", "O'Brien WWTP" = "black")
+
+# Plot combined data
+combinedplot2 <- ggplot(subset_combined, aes(x = date, y = Re_estimate, color = Group)) +
+  geom_line(lwd = 1.1) +
+  geom_ribbon(aes(ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate, fill = Group), 
+              alpha = 0.3, color = "NA") +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.6, 1.4)) +
+  xlab("") +
+  theme_bw() +
+  scale_color_manual(values = group_colors) +
+  ggtitle("R Effective Estimates: WW vs. Hospitalizations vs. Total Cases")
+print(combinedplot2)
+ggsave("combinedplot.png", plot = combinedplot2, width = 15, height = 6)
+```
+
+
+
+```{r}
+combinedplot2 <- ggplot(march22onward, aes(x = date)) +
+  geom_point(aes(y = hospitalizationstotal, color = "Hospitalizations")) +
+  geom_point(aes(y = casestotal, color = "Cases")) +
+    geom_smooth(aes(y = hospitalizationstotal), method = "loess", color = "black", span = 0.5) + # Add LOESS line for hospitalizations
+  geom_smooth(aes(y = casestotal), method = "loess", color = "black", span = 0.5) +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y') +
+  ylab("Cases/Hospitalizations") +
+  scale_y_log10() +
+  xlab("") +
+  theme_bw() +
+  ggtitle("R Effective Estimates: WW vs. Hospitalizations vs. Total Cases") +
+  scale_color_manual(values = c("Hospitalizations" = "red", "Cases" = "blue"))
+
+print(combinedplot2)
+ggsave("hospitalizations and Cases.png", plot = combinedplot2, width = 15, height = 6)
+```
+
+
+```{r}
+
+# Combine the datasets and create a grouping variable
+combined_data <- rbind(
+  mutate(coviduncertaintyestimates, Group = "O'Brien WWTP"),
+  mutate(coviduncertaintyestimates2, Group = "Hospitalizations Data"),
+  mutate(coviduncertaintyestimates3, Group = "Total Cases Data")
+)
+
+subset_combined <- subset(combined_data, date >= "2021-09-01")
+
+# Plot combined data
+combinedplot2 <- ggplot(subset_combined, aes(x = date, y = Re_estimate, color = Group)) +
+  geom_line(lwd = 1.1) +
+  geom_ribbon(aes(ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate, fill = Group), 
+              alpha = 0.4, color = "NA") +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.6, 1.4)) +
+  xlab("") +
+  theme_bw() +
+  ggtitle("R Effective Estimates: WW vs. Hospitalizations vs. Total Cases")
+print(combinedplot2)
+ggsave("combinedplot.png", plot = combinedplot2, width = 15, height = 6)
+```
+
+
+
+```{r}
+# Combine the datasets and create a grouping variable
+combined_data <- rbind(
+  mutate(coviduncertaintyestimates2, Group = "Hospitalizations Data"),
+  mutate(coviduncertaintyestimates3, Group = "Total Cases Data")
+)
+
+group_colors <- c("Hospitalizations Data" = "red", "Total Cases Data" = "blue")
+
+subset_combined <- subset(combined_data, date >= "2021-09-01")
+
+# Plot combined data
+combinedplot3 <- ggplot(subset_combined, aes(x = date, y = Re_estimate, color = Group)) +
+  geom_line(lwd = 1.1) +
+  geom_ribbon(aes(ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate, fill = Group), 
+              alpha = 0.4, color = "NA") +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.6, 1.4)) +
+  xlab("") +
+  theme_bw() +
+  scale_color_manual(values = group_colors) +
+  ggtitle("R Effective Estimates: WW vs. Hospitalizations vs. Total Cases")
+print(combinedplot3)
+ggsave("combinedplot3.png", plot = combinedplot3, width = 15, height = 6)
+
+```

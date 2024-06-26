@@ -1,0 +1,69 @@
+---
+title: "Huisman - O'Brien data cleaning"
+output: html_document
+date: "2024-06-20"
+---
+
+```{r}
+##Reading in the Wastewater Data
+rm(list=ls())
+library(dplyr)
+library(readr)
+
+###############################################
+        ##Import current WW data here:
+###############################################
+odata <- read_csv("Downloads/O'Brien Water Reclamation Plant (2).csv")
+
+```
+
+```{r}
+###############################################
+        ##Data cleaning for algorithm:
+###############################################
+
+## 1. Replacing if at or below the LOD per CDC guidelines ##
+odata$sars_cov_2[odata$sars_cov_2 <= 4080] <- 2040
+summary_stats <- summary(odata$sars_cov_2)
+summary_stats
+
+```
+
+```{r}
+## 2. Collapsing if multiple samples from same date ##
+odata$sample_collect_date <- as.Date(odata$sample_collect_date)
+
+odata <- odata %>%
+  group_by(sample_collect_date) %>%
+  summarize(mean_sars_cov_2 = mean(sars_cov_2, na.rm = TRUE))
+
+summary_stats <- summary(odata$mean_sars_cov_2)
+mean(odata$mean_sars_cov_2)
+summary_stats
+
+odata$sars_cov_2 <- odata$mean_sars_cov_2
+```
+
+```{r}
+## 3. Addressing Outlying points ##
+odata$modcovid <- odata$sars_cov_2
+odata$modcovid[odata$sars_cov_2 >= (225457.8 + (3 * 267770.8))] <- NA
+```
+
+```{r}
+## 4. Generating Incidence Estimate ##
+  #230 million gallons/day on average = 870644710.32 L/day on average
+	#1,263,110 is the estimated population size of the catchment area
+odata$personconc <- (odata$modcovid * 870644710.32) / 1263110
+summary_stats <- summary(odata$personconc)
+print(summary_stats)
+  #Min concentration is 1406145
+odata$inc_est <- (odata$personconc/1406145)
+summary_stats <- summary(odata$inc_est)
+print(summary_stats)
+
+```
+```{r}
+## 5. Saving Data ##
+write.csv(odata, file = "odata.csv", row.names = FALSE)
+```

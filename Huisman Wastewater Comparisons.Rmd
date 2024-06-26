@@ -1,0 +1,752 @@
+---
+title: "Reffective Plots Mult WW Sources"
+output: html_document
+date: "2024-02-22"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+rm(list=ls())
+library(MASS)
+library(devtools)
+install_github("covid-19-Re/estimateR")
+library(estimateR)
+library(scales)
+library(xts)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+```
+
+```{r}
+########################################################
+        ## WASTEWATER DATA - O'Brien WWTP ##
+########################################################
+
+#Loading in the Data Set
+library(haven)
+Obrien_Data_for_Reff <- read_dta("~/Desktop/Desktop - Kyle’s MacBook Pro (2)/CDPH - UChicago Project Work/Publicly Available Data/Reffective Data/Obrien Reff Data2.dta")
+odata <- Obrien_Data_for_Reff
+
+############################
+##Data Cleaning code from STATA
+############################
+
+## 1. Addressing measures at or below the LOD
+#replace sars_cov_2 = 2040 if sars_cov_2<=4080
+#tabstat sars_cov_2, s(n mean sd median min max)
+
+##2. Collapsing Dates with multiple observations
+#collapse (mean) sars_cov_2 method, by(sample_collect_date)
+
+## 2. Addressing Potential Outlying Points
+#gen modcovid = sars_cov_2
+#replace modcovid = . if sars_cov_2 >= (234164.7 + (3*274649.7)) // (mean conc + 3*SD)
+
+## 2. Generating Incidence Estimate
+	#230 million gallons/day on average = 870644710.32 L/day on average
+	#1,263,110 is the estimated population size of the catchment area
+#gen personconc = (modcovid*870644710.32)/1263110 
+#tabstat personconc, s(n mean  median min max)
+
+	##1406145 is the minimum value in the set; assume to be 1 infection event according to paper
+#gen inc_est = personconc/1406145
+#tabstat inc_est, s(n mean  median min max)
+
+subset_odata <- subset(odata, sample_collect_date >= "2022-02-23") #Sub-setting the data for AFTER method switch for WW sampling
+odata <- subset_odata
+
+##Plotting Inc Estimates
+odata$sample_collect_date <- as.Date(odata$sample_collect_date, format = "%Y-%m-%d")
+
+plot(odata$sample_collect_date, odata$inc_est, 
+     xlab = "Date", ylab = "Incidence", 
+     main = "O'Brien WWTP", pch=20)
+
+plot(odata$sample_collect_date, odata$personconc, 
+     xlab = "Date", ylab = "Concentration", 
+     main = "O'Brien WWTP", pch=20)
+```
+
+```{r}
+##1) Visualizing Smoothing
+loess_fit <- loess(inc_est ~ as.numeric(odata$sample_collect_date), data = odata, family = c("symmetric"), span = 0.4)
+loess_points <- predict(loess_fit, data.frame(date = odata$sample_collect_date))
+
+
+plot(odata$sample_collect_date, odata$inc_est, 
+     xlab = "Date", ylab = "Incidence", log="y", 
+     main = "O'Brien WWTP", pch=20)
+lines(odata$sample_collect_date, loess_points, col = "red", lwd = 3)
+
+
+```
+
+```{r}
+#2) Creating variable with even time step for interpolation and use for Reff calculation
+
+odata$sample_collect_date <- as.Date(odata$sample_collect_date, format = "%Y-%m-%d")
+existing_xts <- xts(odata$inc_est, order.by = odata$sample_collect_date)
+
+# Create a sequence of dates with one-day steps
+all_dates <- seq(start(existing_xts), end(existing_xts), by = "1 day")
+
+# Merge the existing data with the sequence of dates
+merged_xts <- merge(existing_xts, xts(rep(NA, length(all_dates)), order.by = all_dates))
+result_df <- data.frame(date = index(merged_xts), value = coredata(merged_xts))
+
+names(odata)[names(odata) == "sample_collect_date"] <- "date"
+merged_data <- merge(odata, result_df, by = "date", all.x = TRUE, all = TRUE)
+odata <- merged_data
+
+```
+
+
+```{r}
+##3) Interpolating Incidence and Smoothing
+odata$interpolated_incidence_data <- na.approx(odata$inc_est) ##interpolating missing values
+
+smoothed_covid_incidence <- smooth_incidence(
+  incidence_data = as.numeric(odata$interpolated_incidence_data),
+  smoothing_method = "LOESS"
+)
+
+```
+
+
+```{r}
+
+##4) Deconvolution (as described in the paper)
+
+#gamma distributions derived from Benefield for SLD
+##From symptom onset to shedding
+meansts <- 6.7 
+sdsts <- 7.0 
+shapests <- (meansts/sdsts)^2
+scalests <- (sdsts^2/meansts)
+STSgamma <- list(name="gamma", shape = shapests, scale = scalests)
+
+##Incubation Period (infection to symptom onset)
+meanI <- 5.3 
+sdI <- 3.2 
+shapeI <- (meanI/sdI)^2
+scaleI <- (sdI^2/meanI)
+Igamma <- list(name="gamma", shape = shapeI, scale = scaleI)
+
+
+
+infection_events <- deconvolve_incidence(
+  incidence_data = smoothed_covid_incidence,
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  delay = list(STSgamma, Igamma)
+)
+
+```
+
+```{r}
+##5) Reff Calculation
+
+date_first_data_point <- as.Date("2022-02-23")
+
+##Serial Interval
+mean_serial_interval = 3.96
+std_serial_interval = 4.75
+
+
+#Estimation Window - Affects Smoothing
+estimation_window = 21
+covid_estimates <- estimate_Re_from_noisy_delayed_incidence(as.numeric(odata$interpolated_incidence_data),
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval  = std_serial_interval,
+  output_Re_only = FALSE,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+head(covid_estimates)
+```
+
+
+```{r}
+##6. R_eff estimation plotting 
+covid_estimates$date <- as.Date(covid_estimates$date, format = "%Y-%m-%d")
+odata$date <- as.Date(odata$date, format = "%Y-%m-%d")
+
+plot(covid_estimates$date, covid_estimates$Re_estimate, 
+     xlab = "Date", ylab = "Reff", 
+     main = "O'Brien WWTP", pch=20, type ="l"   
+     )
+abline(h = 1, col = "red", lty = 2)
+
+```
+
+```{r}
+## 7. Uncertainty Estimation
+
+N_bootstrap_replicates <- 100
+
+coviduncertaintyestimates <- get_block_bootstrapped_estimate(odata$interpolated_incidence_data,
+  N_bootstrap_replicates = N_bootstrap_replicates,
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  uncertainty_summary_method = "original estimate - CI from bootstrap estimates",
+  combine_bootstrap_and_estimation_uncertainties = TRUE,
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval = std_serial_interval,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+#Plot of all data
+plot1 <- ggplot(coviduncertaintyestimates, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  ggtitle("O'Brien WWTP Reff Estimates") +
+  theme_bw()
+
+print(plot1)
+
+```
+
+```{r}
+########################################################
+        ## WASTEWATER DATA - Calumet ##
+########################################################
+
+#Loading in the Data Set
+library(haven)
+Calumet_Data_for_Reff <- read_dta("~/Desktop/Desktop - Kyle’s MacBook Pro (2)/CDPH - UChicago Project Work/Publicly Available Data/Reffective Data/Calument Reff Data.dta")
+cdata <- Calumet_Data_for_Reff
+
+############################
+##Data Cleaning code from STATA
+############################
+
+## 1. Addressing measures at or below the LOD
+#replace sars_cov_2 = 2040 if sars_cov_2<=4080
+#tabstat sars_cov_2, s(n mean sd median min max)
+
+##2. Collapsing Dates with multiple observations
+#collapse (mean) sars_cov_2 method, by(sample_collect_date)
+
+## 2. Addressing Potential Outlying Points
+#gen modcovid = sars_cov_2
+#replace modcovid = . if sars_cov_2 >= (234164.7 + (3*274649.7)) // (mean conc + 3*SD)
+
+## 2. Generating Incidence Estimate
+	#230 million gallons/day on average = 870644710.32 L/day on average
+	#1,263,110 is the estimated population size of the catchment area
+#gen personconc = (modcovid*870644710.32)/1263110 
+#tabstat personconc, s(n mean  median min max)
+
+	##1406145 is the minimum value in the set; assume to be 1 infection event according to paper
+#gen inc_est = personconc/1406145
+#tabstat inc_est, s(n mean  median min max)
+
+subset_cdata <- subset(cdata, sample_collect_date >= "2022-02-23") #Sub-setting the data for AFTER method switch for WW sampling
+cdata <- subset_cdata
+
+##Plotting Inc Estimates
+cdata$sample_collect_date <- as.Date(cdata$sample_collect_date, format = "%Y-%m-%d")
+
+plot(cdata$sample_collect_date, cdata$inc_est, 
+     xlab = "Date", ylab = "Incidence", 
+     main = "Calumet WWTP", pch=20)
+```
+
+```{r}
+##1) Visualizing Smoothing
+loess_fit <- loess(inc_est ~ as.numeric(cdata$sample_collect_date), data = cdata, family = c("symmetric"), span = 0.4)
+loess_points <- predict(loess_fit, data.frame(date = cdata$sample_collect_date))
+
+
+plot(cdata$sample_collect_date, cdata$inc_est, 
+     xlab = "Date", ylab = "Incidence", log="y", 
+     main = "Calumet WWTP", pch=20)
+lines(cdata$sample_collect_date, loess_points, col = "red", lwd = 3)
+
+
+```
+
+```{r}
+#2) Creating variable with even time step for interpolation and use for Reff calculation
+
+cdata$sample_collect_date <- as.Date(cdata$sample_collect_date, format = "%Y-%m-%d")
+existing_xts <- xts(cdata$inc_est, order.by = cdata$sample_collect_date)
+
+# Create a sequence of dates with one-day steps
+all_dates <- seq(start(existing_xts), end(existing_xts), by = "1 day")
+
+# Merge the existing data with the sequence of dates
+merged_xts <- merge(existing_xts, xts(rep(NA, length(all_dates)), order.by = all_dates))
+result_df <- data.frame(date = index(merged_xts), value = coredata(merged_xts))
+
+names(cdata)[names(cdata) == "sample_collect_date"] <- "date"
+merged_data <- merge(cdata, result_df, by = "date", all.x = TRUE, all = TRUE)
+cdata <- merged_data
+
+```
+
+
+```{r}
+##3) Interpolating Incidence and Smoothing
+cdata$interpolated_incidence_data <- na.approx(cdata$inc_est) ##interpolating missing values
+
+smoothed_covid_incidence <- smooth_incidence(
+  incidence_data = as.numeric(cdata$interpolated_incidence_data),
+  smoothing_method = "LOESS"
+)
+
+```
+
+
+```{r}
+
+##4) Deconvolution (as described in the paper)
+
+#gamma distributions derived from Benefield for SLD
+##From symptom onset to shedding
+meansts <- 6.7 
+sdsts <- 7.0 
+shapests <- (meansts/sdsts)^2
+scalests <- (sdsts^2/meansts)
+STSgamma <- list(name="gamma", shape = shapests, scale = scalests)
+
+##Incubation Period (infection to symptom onset)
+meanI <- 5.3 
+sdI <- 3.2 
+shapeI <- (meanI/sdI)^2
+scaleI <- (sdI^2/meanI)
+Igamma <- list(name="gamma", shape = shapeI, scale = scaleI)
+
+
+
+infection_events <- deconvolve_incidence(
+  incidence_data = smoothed_covid_incidence,
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  delay = list(STSgamma, Igamma)
+)
+
+```
+
+```{r}
+##5) Reff Calculation
+
+date_first_data_point <- as.Date("2022-02-23")
+
+##Serial Interval
+mean_serial_interval = 3.96
+std_serial_interval = 4.75
+
+
+#Estimation Window - Affects Smoothing
+estimation_window = 21 
+covid_estimates2 <- estimate_Re_from_noisy_delayed_incidence(as.numeric(cdata$interpolated_incidence_data),
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval  = std_serial_interval,
+  output_Re_only = FALSE,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+head(covid_estimates)
+```
+
+
+```{r}
+##6. R_eff estimation plotting 
+covid_estimates2$date <- as.Date(covid_estimates2$date, format = "%Y-%m-%d")
+cdata$date <- as.Date(cdata$date, format = "%Y-%m-%d")
+
+plot(covid_estimates2$date, covid_estimates2$Re_estimate, 
+     xlab = "Date", ylab = "Reff", 
+     main = "Calumet WWTP", pch=20, type ="l"   
+     )
+abline(h = 1, col = "red", lty = 2)
+
+```
+
+```{r}
+## 7. Uncertainty Estimation
+
+N_bootstrap_replicates <- 100
+
+coviduncertaintyestimates2 <- get_block_bootstrapped_estimate(cdata$interpolated_incidence_data,
+  N_bootstrap_replicates = N_bootstrap_replicates,
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  uncertainty_summary_method = "original estimate - CI from bootstrap estimates",
+  combine_bootstrap_and_estimation_uncertainties = TRUE,
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval = std_serial_interval,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+#Plot of all data
+plot2 <- ggplot(coviduncertaintyestimates2, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  ggtitle("Calumet WWTP Reff Estimates") +
+  theme_bw()
+
+print(plot2)
+
+```
+
+```{r}
+########################################################
+        ## WASTEWATER DATA - Stickney North ##
+########################################################
+
+#Loading in the Data Set
+library(haven)
+StickneyNorth_Data_for_Reff <- read_dta("~/Desktop/Desktop - Kyle’s MacBook Pro (2)/CDPH - UChicago Project Work/Publicly Available Data/Reffective Data/Stickney North Reff Data.dta")
+s1data <- StickneyNorth_Data_for_Reff
+
+############################
+##Data Cleaning code from STATA
+############################
+
+## 1. Addressing measures at or below the LOD
+#replace sars_cov_2 = 2040 if sars_cov_2<=4080
+#tabstat sars_cov_2, s(n mean sd median min max)
+
+##2. Collapsing Dates with multiple observations
+#collapse (mean) sars_cov_2 method, by(sample_collect_date)
+
+## 2. Addressing Potential Outlying Points
+#gen modcovid = sars_cov_2
+#replace modcovid = . if sars_cov_2 >= (234164.7 + (3*274649.7)) // (mean conc + 3*SD)
+
+## 2. Generating Incidence Estimate
+	#230 million gallons/day on average = 870644710.32 L/day on average
+	#1,263,110 is the estimated population size of the catchment area
+#gen personconc = (modcovid*870644710.32)/1263110 
+#tabstat personconc, s(n mean  median min max)
+
+	##1406145 is the minimum value in the set; assume to be 1 infection event according to paper
+#gen inc_est = personconc/1406145
+#tabstat inc_est, s(n mean  median min max)
+
+subset_s1data <- subset(s1data, sample_collect_date >= "2022-02-23") #Sub-setting the data for AFTER method switch for WW sampling
+s1data <- subset_s1data
+
+##Plotting Inc Estimates
+s1data$sample_collect_date <- as.Date(s1data$sample_collect_date, format = "%Y-%m-%d")
+
+plot(s1data$sample_collect_date, s1data$inc_est, 
+     xlab = "Date", ylab = "Incidence", 
+     main = "Stickney North WWTP", pch=20)
+```
+
+```{r}
+##1) Visualizing Smoothing
+loess_fit <- loess(inc_est ~ as.numeric(s1data$sample_collect_date), data = s1data, family = c("symmetric"), span = 0.4)
+loess_points <- predict(loess_fit, data.frame(date = s1data$sample_collect_date))
+
+
+plot(s1data$sample_collect_date, s1data$inc_est, 
+     xlab = "Date", ylab = "Incidence", log="y", 
+     main = "Stickney North WWTP", pch=20)
+lines(s1data$sample_collect_date, loess_points, col = "red", lwd = 3)
+
+
+```
+
+```{r}
+#2) Creating variable with even time step for interpolation and use for Reff calculation
+
+s1data$sample_collect_date <- as.Date(s1data$sample_collect_date, format = "%Y-%m-%d")
+existing_xts <- xts(s1data$inc_est, order.by = s1data$sample_collect_date)
+
+# Create a sequence of dates with one-day steps
+all_dates <- seq(start(existing_xts), end(existing_xts), by = "1 day")
+
+# Merge the existing data with the sequence of dates
+merged_xts <- merge(existing_xts, xts(rep(NA, length(all_dates)), order.by = all_dates))
+result_df <- data.frame(date = index(merged_xts), value = coredata(merged_xts))
+
+names(s1data)[names(s1data) == "sample_collect_date"] <- "date"
+merged_data <- merge(s1data, result_df, by = "date", all.x = TRUE, all = TRUE)
+s1data <- merged_data
+
+```
+
+
+```{r}
+##3) Interpolating Incidence and Smoothing
+s1data$interpolated_incidence_data <- na.approx(s1data$inc_est) ##interpolating missing values
+
+smoothed_covid_incidence <- smooth_incidence(
+  incidence_data = as.numeric(s1data$interpolated_incidence_data),
+  smoothing_method = "LOESS"
+)
+
+```
+
+
+```{r}
+
+##4) Deconvolution (as described in the paper)
+
+#gamma distributions derived from Benefield for SLD
+##From symptom onset to shedding
+meansts <- 6.7 
+sdsts <- 7.0 
+shapests <- (meansts/sdsts)^2
+scalests <- (sdsts^2/meansts)
+STSgamma <- list(name="gamma", shape = shapests, scale = scalests)
+
+##Incubation Period (infection to symptom onset)
+meanI <- 5.3 
+sdI <- 3.2 
+shapeI <- (meanI/sdI)^2
+scaleI <- (sdI^2/meanI)
+Igamma <- list(name="gamma", shape = shapeI, scale = scaleI)
+
+
+
+infection_events <- deconvolve_incidence(
+  incidence_data = smoothed_covid_incidence,
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  delay = list(STSgamma, Igamma)
+)
+
+```
+
+```{r}
+##5) Reff Calculation
+
+date_first_data_point <- as.Date("2022-02-23")
+
+##Serial Interval
+mean_serial_interval = 3.96
+std_serial_interval = 4.75
+
+
+#Estimation Window - Affects Smoothing
+estimation_window = 21 
+covid_estimates3 <- estimate_Re_from_noisy_delayed_incidence(as.numeric(s1data$interpolated_incidence_data),
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval  = std_serial_interval,
+  output_Re_only = FALSE,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+head(covid_estimates3)
+```
+
+
+```{r}
+##6. R_eff estimation plotting 
+covid_estimates3$date <- as.Date(covid_estimates3$date, format = "%Y-%m-%d")
+s1data$date <- as.Date(s1data$date, format = "%Y-%m-%d")
+
+plot(covid_estimates3$date, covid_estimates3$Re_estimate, 
+     xlab = "Date", ylab = "Reff", 
+     main = "Stickney North WWTP", pch=20, type ="l"   
+     )
+abline(h = 1, col = "red", lty = 2)
+
+```
+
+```{r}
+## 7. Uncertainty Estimation
+
+N_bootstrap_replicates <- 100
+
+coviduncertaintyestimates3 <- get_block_bootstrapped_estimate(s1data$interpolated_incidence_data,
+  N_bootstrap_replicates = N_bootstrap_replicates,
+  smoothing_method = "LOESS",
+  deconvolution_method = "Richardson-Lucy delay distribution",
+  estimation_method = "EpiEstim sliding window",
+  uncertainty_summary_method = "original estimate - CI from bootstrap estimates",
+  combine_bootstrap_and_estimation_uncertainties = TRUE,
+  delay = list(STSgamma, Igamma),
+  estimation_window = estimation_window,
+  mean_serial_interval = mean_serial_interval,
+  std_serial_interval = std_serial_interval,
+  ref_date = date_first_data_point,
+  time_step = "day"
+)
+
+#Plot of all data
+plot3 <- ggplot(coviduncertaintyestimates3, aes(x = date, y = Re_estimate)) +
+  geom_line(lwd=  1.1) +
+  geom_ribbon(aes(x = date, ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate), alpha = 0.15, colour = "NA") +
+  scale_x_date(date_breaks = "1 month", 
+               date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "red") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.5, 1.5)) +
+  xlab("") +
+  ggtitle("Stickney North WWTP Reff Estimates") +
+  theme_bw()
+
+print(plot3)
+
+```
+
+```{r}
+##############################################################
+#       Combined Plot Obrien & Calumet & Stickney North      #
+##############################################################
+coviduncertaintyestimates$date <- as.Date(coviduncertaintyestimates$date)
+coviduncertaintyestimates2$date <- as.Date(coviduncertaintyestimates2$date)
+coviduncertaintyestimates3$date <- as.Date(coviduncertaintyestimates3$date)
+
+# Combine the datasets and create a grouping variable
+combined_data <- rbind(
+  mutate(coviduncertaintyestimates, Group = "O'Brien WWTP"),
+  mutate(coviduncertaintyestimates2, Group = "Calumet WWTP"),
+  mutate(coviduncertaintyestimates3, Group = "Stickney North WWTP")
+)
+
+group_colors <- c("Calumet WWTP" = "red", "Stickney North WWTP" = "blue", "O'Brien WWTP" = "black")
+
+# Plot combined data
+combinedplot <- ggplot(combined_data, aes(x = date, y = Re_estimate, color = Group)) +
+  geom_line(lwd = 1.1) +
+  geom_ribbon(aes(ymax = CI_up_Re_estimate, ymin = CI_down_Re_estimate, fill = Group), 
+              alpha = 0.4, color = "NA") +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y') +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black") +
+  ylab("Reproductive number") +
+  coord_cartesian(ylim = c(0.6, 1.4)) +
+  xlab("") +
+  theme_bw() +
+  scale_color_manual(values = group_colors) +
+  ggtitle("R Effective Estimates: Obrien WWTP v Calumet WWTP v Stickney North WWTP")
+print(combinedplot)
+
+ggsave("wwcombinedplot.png", plot = combinedplot, width = 15, height = 6)
+
+```
+
+```{r}
+##############################################################
+#  Combined Plot Obrien & Calumet & Stickney North - Concentrations     #
+##############################################################
+odata$date <- as.Date(odata$date)
+cdata$date <- as.Date(cdata$date)
+s1data$date <- as.Date(s1data$date)
+
+# Combine the datasets and create a grouping variable
+combined_data2 <- rbind(
+  mutate(odata, Group = "O'Brien WWTP"),
+  mutate(cdata, Group = "Calumet WWTP"),
+  mutate(s1data, Group = "Stickney North WWTP")
+)
+
+# Plot combined data
+combinedplot2 <- ggplot(combined_data2, aes(x = date, y = personconc, color = Group)) +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y')  +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE, linewidth=1.5, span=0.4)  +
+  ylab("Normalized Conc.")  +
+  xlab("") +
+  theme_bw() +
+  ggtitle("Normalized Concentration: Obrien WWTP v Calumet WWTP v Stickney North WWTP")
+print(combinedplot2)
+
+ggsave("wwcombinedplot2.png", plot = combinedplot2, width = 15, height = 6)
+
+# Plot combined data
+combinedplot3 <- ggplot(combined_data2, aes(x = date, y = inc_est, color = Group)) +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y')  +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE, linewidth=1.5, span=0.4) +
+  ylab("Incidence Estimates")  +
+  xlab("") +
+  theme_bw() +
+  ggtitle("Incidence Estimates: Obrien WWTP v Calumet WWTP v Stickney North WWTP")
+print(combinedplot3)
+
+ggsave("wwcombinedplot3.png", plot = combinedplot3, width = 15, height = 6)
+
+
+```
+
+```{r}
+library(haven)
+hdata2 <- read_dta("~/Desktop/CDPH - UChicago Project Work/Publicly Available Data/Code for Reproducing CDPH Plots/Hdata2.dta")
+View(hdata2)
+
+hdata2 <- hdata2[-1447, ] ##one observation with missing date
+hdata2$date <- as.Date(hdata2$date, format = "%m/%d/%Y", errors = "coerce")
+
+hdata2 <- hdata2[order(hdata2$date), ] ##Ordering by Date so that LOESS line fits properly
+hdata2$numeric_date <- as.numeric(hdata2$date)
+
+loess_fit <- loess(hospitalizationstotal ~ numeric_date, data = hdata2, family = c("symmetric"), span = 0.3)
+newdata <- data.frame(numeric_date = as.numeric(hdata2$date))
+loess_points <- predict(loess_fit, newdata = newdata)
+
+
+```
+
+```{r}
+march22onward <- subset(hdata2, date >= as.Date("2022-03-01"))
+
+# Plotting for the first dataframe
+combinedplot3 <- ggplot(combined_data2, aes(x = date, y = inc_est, col=Group)) +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y')  +
+  geom_point(shape=19) +  # Scatter plot for the first dataframe
+  geom_smooth(method = "loess", se = FALSE, linewidth=1.5, span=0.4)  +
+  ylab("Incidence Estimates")  +
+  xlab("") +
+  theme_bw() +
+  ggtitle("Normalized Concentration: Obrien WWTP v Calumet WWTP v Stickney North WWTP")
+
+# Adding scatter plot for the second dataframe
+combinedplot4 <- ggplot(march22onward, aes(x = date, y = casestotal)) +
+  scale_x_date(date_breaks = "1 month", date_labels = '%b\n%Y')  +
+  geom_point(shape=19) +  # Scatter plot for the first dataframe
+  geom_smooth(method = "loess", se = FALSE, linewidth=1.5, span=0.28)  +
+  ylab("Cases Total")  +
+  xlab("") +
+  theme_bw() +
+  ggtitle("Cases Total Over Time")
+
+print(combinedplot3)
+print(combinedplot4)
+ggsave("hospitalvWWplot.png", plot = combinedplot3, width = 15, height = 6)
+ggsave("CasesTotalperTime.png", plot = combinedplot4, width = 15, height = 6)
+
+```
