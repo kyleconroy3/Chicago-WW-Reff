@@ -1,0 +1,64 @@
+---
+title: "(1) Data_Cleaning_Goldstein"
+output: html_document
+date: "2024-06-24"
+---
+
+```{r}
+rm(list=ls())
+library(dplyr)
+library(readr)
+
+###############################################
+        ##Import current WW data here:
+###############################################
+odata <- read_csv("Downloads/O'Brien Water Reclamation Plant (2).csv")
+
+```
+
+
+```{r}
+#######################################################
+ ##Remove old method samples & unnecessary variables:
+#######################################################
+odata <- subset(odata, method != 0)
+odata <- subset(odata, select = -c(influenza_a, influenza_b, method, rsv))
+
+odata <- odata %>%
+  rename(gene_copy = sars_cov_2,
+         date = sample_collect_date)
+
+```
+
+```{r}
+###############################################
+        ##Generate Numberic Date Variables:
+###############################################
+
+odata$num_date <- as.numeric(odata$date)
+odata$year <- NA
+odata$year[odata$num_date < 19358] <- 2022
+odata$year[odata$num_date >= 19358 & odata$num_date < 19724] <- 2023
+odata$year[odata$num_date >= 19724] <- 2024
+
+odata$yearday <- odata$num_date 
+odata$yearday[odata$year == 2022] <- odata$num_date[odata$year == 2022] - (52 * 365) - 12
+odata$yearday[odata$year == 2023] <- odata$num_date[odata$year == 2023] - (53 * 365) - 12
+odata$yearday[odata$year == 2024] <- odata$num_date[odata$year == 2024] - (54 * 365) - 12
+
+
+odata$year_day <- odata$num_date - (52*365) - 12
+odata$new_time = odata$year_day - 43
+
+
+odata$sum_genes = odata$gene_copy
+odata$log_gene_copies = log10(odata$gene_copy)
+
+odata$epi_week2 <- (odata$yearday - 1) / 7 + 1
+odata$epi_week <- floor(odata$epi_week2)
+```
+
+```{r}
+## 5. Saving Data ##
+write.csv(odata, file = "Obriendata.csv", row.names = FALSE)
+```
