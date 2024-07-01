@@ -451,7 +451,7 @@ make_fixed_param_plot <- function(posterior_gq_samples, prior_gq_samples){
 make_post_pred_intervals <- function(posterior_predictive, sim_data, cases = FALSE, ten_sim = FALSE, three_mean = FALSE){
   if (cases == FALSE & ten_sim == FALSE & three_mean == FALSE) {
     obs_time <- sim_data %>%
-    dplyr::select(log_gene_copies1, log_gene_copies2, log_gene_copies3, new_time) %>%
+    dplyr::select(log_gene_copies, new_time) %>%
     pivot_longer(-(new_time)) %>%
     filter(value > 0) %>%
     arrange(name) %>%
@@ -478,16 +478,7 @@ make_post_pred_intervals <- function(posterior_predictive, sim_data, cases = FAL
     select(new_time, name, value, starts_with("."))
   } else if (cases == FALSE & ten_sim == TRUE & three_mean == FALSE) {
     obs_time <- sim_data %>%
-      dplyr::select(log_gene_copies1, 
-                    log_gene_copies2, 
-                    log_gene_copies3, 
-                    log_gene_copies4, 
-                    log_gene_copies5, 
-                    log_gene_copies6, 
-                    log_gene_copies7,
-                    log_gene_copies8,
-                    log_gene_copies9,
-                    log_gene_copies10,
+      dplyr::select(log_gene_copies,
                     new_time) %>%
       pivot_longer(-(new_time)) %>%
       filter(value > 0) %>%
