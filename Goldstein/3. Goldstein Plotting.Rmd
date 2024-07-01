@@ -47,7 +47,7 @@ library(gridExtra)
 library(cowplot)
 library(scales)
 library(dplyr)
-source(here::here("desktop/ww_paper-1/src/wastewater_functions2.R"))
+source(here::here("desktop/ww_paper-1/src/wastewater_functions.R"))
 sim = "real"
 seed = 1
 
