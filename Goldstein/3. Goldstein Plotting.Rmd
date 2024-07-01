@@ -47,7 +47,7 @@ library(gridExtra)
 library(cowplot)
 library(scales)
 library(dplyr)
-source(here::here("ww_paper-1/src/wastewater_functions.R"))
+source(here::here("desktop/ww_paper-1/src/wastewater_functions2.R"))
 sim = "real"
 seed = 1
 
@@ -167,7 +167,7 @@ if (sim == 4) {
   three_mean_val = FALSE
 }
 
-eirr_post_pred_intervals <- make_post_pred_intervals(eirr_post_pred, simdata, ten_sim = ten_sim_val, three_mean = three_mean_val)
+eirr_post_pred_intervals <- make_post_pred_intervals(eirr_post_pred, simdata, ten_sim = ten_sim_val, three_mean = FALSE)
 ```
 
 ## Visualizing the posterior of Rt
