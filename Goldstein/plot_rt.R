@@ -29,7 +29,7 @@ run <- function(cfg) {
   }
   
   ## load posterior samples, calculate mcmc diagnostics
-  gq_file<- paste0(cfg$out_dir, "/generated_quantities_scenario", sim, "_seed", seed, "_", cfg$ts, ".csv")
+  gq_file<- paste0(cfg$out_dir, "/", cfg$gen_quants_filename)
   posterior_samples <- read_csv(gq_file) %>%
     rename(.iteration = iteration,
            .chain = chain) %>%
@@ -47,7 +47,7 @@ run <- function(cfg) {
   posterior_timevarying_quantiles <- make_timevarying_posterior_quantiles(posterior_gq_samples_all)
   
   #  Create quantiles for the posterior predictive for each day there was observed data
-  post_pred_file <-  paste0(cfg$out_dir, "/posterior_predictive_scenario", sim, "_seed", seed, "_", cfg$ts, ".csv")
+  post_pred_file <-  paste0(cfg$out_dir, "/", cfg$post_pred_filename)
   eirr_post_pred <- read_csv(post_pred_file)
   
   real_data <- read_csv(cfg$ww_data)

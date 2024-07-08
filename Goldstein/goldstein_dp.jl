@@ -74,7 +74,8 @@ function run(cfg)
     seed = cfg["seed"]
     Random.seed!(seed)
     # TODO 10 as default arg, use n_reps in cfg.
-    MAP_init = optimize_many_MAP(my_model, 10, 1, true)[1]
+    n_reps = cfg["n_reps"]
+    MAP_init = optimize_many_MAP(my_model, n_reps, 1, true)[1]
 
     n_chains = cfg["n_chains"]
     Random.seed!(seed)
@@ -110,14 +111,10 @@ function run(cfg)
     gq_randn = get_gq_chains(my_model, posterior_samples_randn);
 
     out_dir = cfg["out_dir"]
-    println(out_dir)
-    sim = cfg["sim"]
-    ts = cfg["ts"]
-    CSV.write(string(out_dir, "/generated_quantities", "_scenario", sim, "_seed", seed, "_", ts, ".csv"), DataFrame(gq_randn))
-    CSV.write(string(out_dir, "/posterior_predictive", "_scenario", sim, "_seed", seed, "_", ts, ".csv"),
-                     DataFrame(predictive_randn))
 
-    CSV.write(string(out_dir, "/posterior_df", "_scenario", sim, "_seed", seed, "_", ts, ".csv"), DataFrame(posterior_samples))
+    CSV.write(string(out_dir, "/", cfg["gen_quants_filename"]), DataFrame(gq_randn))
+    CSV.write(string(out_dir, "/", cfg["post_pred_filename"]), DataFrame(predictive_randn))
+    CSV.write(string(out_dir, "/", cfg["posterior_df_filename"]), DataFrame(posterior_samples))
 end
 
 Pkg.add("YAML")
