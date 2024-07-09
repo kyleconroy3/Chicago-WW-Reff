@@ -3,14 +3,12 @@ import os
 import datetime
 from typing import Dict, Union
 import subprocess
+from pathlib import Path
 
 PathLike = Union[str, bytes, os.PathLike]
 
 
-def write_cfg(cfg: Dict):
-    # TODO: how to set in production
-    out_dir = '/home/nick/Documents/repos/Chicago-WW-Reff/Goldstein/output'
-    cfg['out_dir'] = out_dir
+def write_cfg(out_dir):
     cfg_file = os.path.join(out_dir, f"cfg_{cfg['ts']}.yaml")
     with open(cfg_file, 'w') as f_out:
         yaml.safe_dump(cfg, f_out)
@@ -54,23 +52,27 @@ def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
         raise ValueError()
 
 
-def run(n_samples: int, n_chains: int, root_path: PathLike, n_threads: int):
+def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threads: int):
     os.environ['JULIA_NUM_THREADS'] = str(n_threads)
-    goldstein_jl = f'{root_path}/Goldstein/goldstein_dp.jl'
-    plot_r = f'{root_path}/Goldstein/plot_rt.R'
-    waste_water_r = f'{root_path}/Goldstein/WW_paper-1/src/wastewater_functions.R'
+    goldstein_jl = str(Path(root_path, 'Goldstein', 'goldstein_dp.jl'))
+    plot_r = str(Path(root_path, 'Goldstein', 'plot_rt.R'))
+    waste_water_r = str(Path(root_path, 'Goldstein', 'WW_paper-1', 'src', 'wastewater_functions.R'))
+
+    out_path = Path(root_path, 'Goldstein', 'output')
+    out_path.mkdir(exist_ok=True)
 
     now = datetime.datetime.now()
     ts = now.strftime('%Y%m%d_%H%M%S')
     cfg = {
         'ts': ts,
         'root_path': root_path,
+        'out_dir': str(out_path),
         'sim': 'real',
         'seed': 1,
         'rt_plot_name': f'rt_plot_{ts}.png',
         'n_samples': n_samples,
         'n_chains': n_chains,
-        'n_reps': 10,
+        'n_reps': n_reps,
         'waste_water_r': waste_water_r,
         'gen_quants_filename': f'generated_quantities_{ts}.csv',
         'post_pred_filename': f'posterior_predictive_{ts}.csv',
@@ -89,4 +91,4 @@ if __name__ == '__main__':
     n_chains = 2
 
     root_path = '/home/nick/Documents/repos/Chicago-WW-Reff'
-    run(n_samples, n_chains, root_path, 8)
+    run(n_samples, n_chains, 10, root_path, 10)
