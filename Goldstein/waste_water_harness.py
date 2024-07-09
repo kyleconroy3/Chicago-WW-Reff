@@ -8,7 +8,8 @@ from pathlib import Path
 PathLike = Union[str, bytes, os.PathLike]
 
 
-def write_cfg(out_dir):
+def write_cfg(cfg: Dict):
+    out_dir = cfg['out_dir']
     cfg_file = os.path.join(out_dir, f"cfg_{cfg['ts']}.yaml")
     with open(cfg_file, 'w') as f_out:
         yaml.safe_dump(cfg, f_out)
