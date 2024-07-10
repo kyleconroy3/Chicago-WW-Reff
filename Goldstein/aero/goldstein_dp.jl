@@ -1,7 +1,7 @@
 this_d = dirname(@__FILE__)
-
+println(this_d)
 using Pkg
-Pkg.activate(this_d * "/WW_paper-1/")
+Pkg.activate(this_d * "/../WW_paper-1/")
 Pkg.update()
 Pkg.resolve()
 
@@ -124,7 +124,7 @@ cfg_file = ARGS[1]
 cfg = YAML.load_file(cfg_file)
 
 
-init_includes(string(this_d, "/WW_paper-1/src"), cfg["seed"])
+init_includes(string(this_d, "/../WW_paper-1/src"), cfg["seed"])
 run(cfg)
 
 
