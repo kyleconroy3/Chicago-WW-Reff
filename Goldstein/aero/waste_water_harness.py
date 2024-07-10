@@ -22,6 +22,7 @@ def stage_data(cfg: Dict):
 
 
 def store_output(cfg: Dict):
+    # csv files
     gen_quants = os.path.join(cfg['out_dir'], cfg["gen_quants_filename"])
     post_preds = os.path.join(cfg['out_dir'], cfg["post_pred_filename"])
     posterior_df = os.path.join(cfg['out_dir'], cfg["posterior_df_filename"])
@@ -49,17 +50,17 @@ def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
     try:
         subprocess.run(args, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
-        print(e.cmd, e.stderr)
-        raise ValueError()
+        print(e.cmd, e.stdout, e.stderr)
+        raise ValueError(f'{e.cmd}\n{e.stdout}\n{e.stderr}')
 
 
 def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threads: int):
     os.environ['JULIA_NUM_THREADS'] = str(n_threads)
-    goldstein_jl = str(Path(root_path, 'Goldstein', 'goldstein_dp.jl'))
-    plot_r = str(Path(root_path, 'Goldstein', 'plot_rt.R'))
+    goldstein_jl = str(Path(root_path, 'Goldstein', 'aero', 'goldstein_dp.jl'))
+    plot_r = str(Path(root_path, 'Goldstein',  'aero', 'plot_rt.R'))
     waste_water_r = str(Path(root_path, 'Goldstein', 'WW_paper-1', 'src', 'wastewater_functions.R'))
 
-    out_path = Path(root_path, 'Goldstein', 'output')
+    out_path = Path(root_path, 'Goldstein', 'aero', 'output')
     out_path.mkdir(exist_ok=True)
 
     now = datetime.datetime.now()
@@ -85,11 +86,12 @@ def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threa
     run_goldstein(goldstein_jl, cfg_file)
     store_output(cfg)
     run_rt_plot(plot_r, cfg, cfg_file)
+    return cfg
 
 
 if __name__ == '__main__':
     n_samples = 10
     n_chains = 2
 
-    root_path = '/home/nick/Documents/repos/Chicago-WW-Reff'
+    root_path = '/lcrc/project/EMEWS/bebop-2.0/ncollier/repos/Chicago-WW-Reff'
     run(n_samples, n_chains, 10, root_path, 10)
