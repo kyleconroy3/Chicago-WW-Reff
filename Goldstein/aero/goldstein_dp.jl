@@ -33,11 +33,7 @@ end
 function run(cfg)
     # if sim == "real"
     dat = CSV.read(cfg["ww_data"], DataFrame)
-<<<<<<< HEAD
     # dat = filter(:year_day => year_day -> year_day < 423, dat)
-=======
-    dat = filter(:year_day => year_day -> year_day < 423, dat)
->>>>>>> 00ecfd4 (Moved aero related files to aero)
     ## Define Priors
     
     
@@ -130,9 +126,3 @@ cfg = YAML.load_file(cfg_file)
 
 init_includes(string(this_d, "/../WW_paper-1/src"), cfg["seed"])
 run(cfg)
-<<<<<<< HEAD
-=======
-
-
-
->>>>>>> 00ecfd4 (Moved aero related files to aero)

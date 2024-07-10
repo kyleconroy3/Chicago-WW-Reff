@@ -72,11 +72,8 @@ run <- function(cfg) {
   
   real_data$epi_week[real_data$year == 2023] <- real_data$epi_week[real_data$year == 2023] + 52
   real_data$epi_week[real_data$year == 2024] <- real_data$epi_week[real_data$year == 2024] + 104
-<<<<<<< HEAD
   real_data$epi_week[real_data$year == 2025] <- real_data$epi_week[real_data$year == 2025] + (52 * 3)
   
-=======
->>>>>>> 00ecfd4 (Moved aero related files to aero)
   date_week_crosswalk <- real_data %>% 
     dplyr::select(date, epi_week, new_time) %>%
     mutate(time = epi_week - 7)
