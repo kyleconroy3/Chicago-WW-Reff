@@ -126,6 +126,3 @@ cfg = YAML.load_file(cfg_file)
 
 init_includes(string(this_d, "/../WW_paper-1/src"), cfg["seed"])
 run(cfg)
-
-
-
