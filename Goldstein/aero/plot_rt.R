@@ -99,7 +99,7 @@ run <- function(cfg) {
     my_theme + 
     geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1) +  # Add horizontal line 
     theme(axis.text.x = element_text(angle = 90),
-          legend.position = c(0.1, 0.2),
+          legend.position.inside = c(0.1, 0.2),
           text = element_text(size = 10),
           legend.background = element_blank())
   
