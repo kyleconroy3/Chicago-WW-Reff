@@ -58,10 +58,6 @@ def run_rt_plot(plot_r: PathLike, cfg: Dict, cfg_file: PathLike):
     # TODO: Uncomment when AERO is working - add source ids for the other outputs??
     # sources = cfg['ww_data_id']
     # store_output(expected_plot, 'waster png plot', sources)
-    # try:
-    #     subprocess.run(args, check=True, capture_output=True, text=True)
-    # except subprocess.CalledProcessError as e:
-    #     return e.cmd, e.output
 
 
 def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
