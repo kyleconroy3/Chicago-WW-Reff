@@ -1,9 +1,11 @@
 import yaml
 import os
 import datetime
-from typing import Dict, Union
-import subprocess
+from typing import Dict, Union, List
 from pathlib import Path
+import subprocess
+from dsaas_client.api import save_output
+
 
 PathLike = Union[str, bytes, os.PathLike]
 
@@ -19,17 +21,32 @@ def write_cfg(cfg: Dict):
 def stage_data(cfg: Dict):
     # TODO: AERO to get ww_data
     cfg['ww_data'] = f'{cfg["root_path"]}/Goldstein/WW_paper-1/data/Obriendata.csv'
+    # TODO: AREO obrien data id
+    # cfg['ww_data_id'] = ...
 
 
-def store_output(cfg: Dict):
+def store_output(fname: PathLike, description: str, sources: List):
+    # assumes source is obrien data source
+    name = os.path.basename(fname)
+    with open(fname, 'rb') as fin:
+        data = fin.read()
+    collection = 'https://g-8b681.fd635.8443.data.globus.org/valerie/'
+    save_output(data=data, collection_url=collection, name=name,
+                description=description, sources=sources)
+
+
+def store_outputs(cfg: Dict):
+    sources = [cfg['ww_data_id']]
     # csv files
     gen_quants = os.path.join(cfg['out_dir'], cfg["gen_quants_filename"])
+    store_output(gen_quants, 'Waster water generated quantities', sources)
     post_preds = os.path.join(cfg['out_dir'], cfg["post_pred_filename"])
+    store_output(post_preds, 'Waster water posterior predictive', sources)
     posterior_df = os.path.join(cfg['out_dir'], cfg["posterior_df_filename"])
-    # TODO: write these to data store with AERO
+    store_output(posterior_df, 'Waster water posterior samples', sources)
 
 
-def run_rt_plot(plot_r: PathLike, cfg, cfg_file: PathLike):
+def run_rt_plot(plot_r: PathLike, cfg: Dict, cfg_file: PathLike):
     # Rscript doesn't return error code or raise exception error,
     # so check that the plot is created as expected
     expected_plot = os.path.join(cfg['out_dir'], cfg['rt_plot_name'])
@@ -37,6 +54,10 @@ def run_rt_plot(plot_r: PathLike, cfg, cfg_file: PathLike):
     res = subprocess.run(args, check=False, capture_output=True, text=True)
     if not os.path.exists(expected_plot):
         raise ValueError(res.stderr)
+
+    # TODO: Uncomment when AERO is working - add source ids for the other outputs??
+    # sources = cfg['ww_data_id']
+    # store_output(expected_plot, 'waster png plot', sources)
     # try:
     #     subprocess.run(args, check=True, capture_output=True, text=True)
     # except subprocess.CalledProcessError as e:
@@ -57,7 +78,7 @@ def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
 def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threads: int):
     os.environ['JULIA_NUM_THREADS'] = str(n_threads)
     goldstein_jl = str(Path(root_path, 'Goldstein', 'aero', 'goldstein_dp.jl'))
-    plot_r = str(Path(root_path, 'Goldstein',  'aero', 'plot_rt.R'))
+    plot_r = str(Path(root_path, 'Goldstein', 'aero', 'plot_rt.R'))
     waste_water_r = str(Path(root_path, 'Goldstein', 'WW_paper-1', 'src', 'wastewater_functions.R'))
 
     out_path = Path(root_path, 'Goldstein', 'aero', 'output')
@@ -84,7 +105,8 @@ def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threa
     stage_data(cfg)
     cfg_file = write_cfg(cfg)
     run_goldstein(goldstein_jl, cfg_file)
-    store_output(cfg)
+    # TODO: uncomment when AERO is working
+    # store_output(cfg)
     run_rt_plot(plot_r, cfg, cfg_file)
     return cfg
 
