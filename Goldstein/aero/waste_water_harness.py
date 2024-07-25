@@ -1,7 +1,7 @@
 import yaml
 import os
 import datetime
-from typing import Dict, Union, List
+from typing import Dict, Union
 from pathlib import Path
 import subprocess
 from dsaas_client.api import save_output
@@ -25,18 +25,17 @@ def stage_data(cfg: Dict):
     # cfg['ww_data_id'] = ...
 
 
-def store_output(fname: PathLike, description: str, sources: List):
-    # assumes source is obrien data source
+def store_output(fname: PathLike, description: str, sources: Dict):
     name = os.path.basename(fname)
     with open(fname, 'rb') as fin:
         data = fin.read()
-    collection = 'https://g-8b681.fd635.8443.data.globus.org/valerie/'
+    collection = "https://g-c952d0.1305de.36fe.data.globus.org/"
     save_output(data=data, collection_url=collection, name=name,
                 description=description, sources=sources)
 
 
 def store_outputs(cfg: Dict):
-    sources = [cfg['ww_data_id']]
+    sources = {}  # [cfg['ww_data_id']]
     # csv files
     gen_quants = os.path.join(cfg['out_dir'], cfg["gen_quants_filename"])
     store_output(gen_quants, 'Waster water generated quantities', sources)
@@ -56,8 +55,8 @@ def run_rt_plot(plot_r: PathLike, cfg: Dict, cfg_file: PathLike):
         raise ValueError(res.stderr)
 
     # TODO: Uncomment when AERO is working - add source ids for the other outputs??
-    # sources = cfg['ww_data_id']
-    # store_output(expected_plot, 'waster png plot', sources)
+    sources = {}  # cfg['ww_data_id']
+    store_output(expected_plot, 'waster png plot', sources)
 
 
 def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
@@ -102,7 +101,7 @@ def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threa
     cfg_file = write_cfg(cfg)
     run_goldstein(goldstein_jl, cfg_file)
     # TODO: uncomment when AERO is working
-    # store_output(cfg)
+    store_outputs(cfg)
     run_rt_plot(plot_r, cfg, cfg_file)
     return cfg
 
