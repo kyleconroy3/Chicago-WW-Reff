@@ -5,6 +5,7 @@ from typing import Dict, Union
 from pathlib import Path
 import subprocess
 from dsaas_client.api import save_output
+from dsaas_client.api import get_file
 
 
 PathLike = Union[str, bytes, os.PathLike]
@@ -19,10 +20,10 @@ def write_cfg(cfg: Dict):
 
 
 def stage_data(cfg: Dict):
-    # TODO: AERO to get ww_data
     cfg['ww_data'] = f'{cfg["root_path"]}/Goldstein/WW_paper-1/data/Obriendata.csv'
-    # TODO: AREO obrien data id
-    # cfg['ww_data_id'] = ...
+    # AERO file retrieval
+    # data = get_file(cfg['ww_data_source_id'])
+    # data.to_csv(cfg['ww_data'], index=False)
 
 
 def store_output(fname: PathLike, description: str, sources: Dict):
