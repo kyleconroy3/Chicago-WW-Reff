@@ -48,7 +48,7 @@ odata$yearday[odata$year == 2024] <- odata$num_date[odata$year == 2024] - (54 * 
 
 
 odata$year_day <- odata$num_date - (52*365) - 12
-odata$new_time = odata$year_day - 43
+odata$new_time = odata$year_day - (odata$year_day[1] - 1)
 
 
 odata$sum_genes = odata$gene_copy
