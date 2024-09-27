@@ -33,7 +33,7 @@ end
 function run(cfg)
     # if sim == "real"
     dat = CSV.read(cfg["ww_data"], DataFrame)
-    dat = filter(:year_day => year_day -> year_day < 423, dat)
+    # dat = filter(:year_day => year_day -> year_day < 423, dat)
     ## Define Priors
     
     
