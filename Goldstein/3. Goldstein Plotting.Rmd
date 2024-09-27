@@ -69,7 +69,7 @@ if (sim %in% repeat_scenario1s) {
 ## load posterior samples, calculate mcmc diagnostics
 
 ```{r}
-gq_address <- paste0("ww_paper-1/vignettes3/generated_quantities_scenario", 
+gq_address <- paste0("ww_paper-1/vignettes/generated_quantities_scenario", 
                      sim, 
                      "_seed", 
                      seed,
@@ -108,7 +108,7 @@ posterior_timevarying_quantiles <- make_timevarying_posterior_quantiles(posterio
 This code creates quantiles for the posterior predictive for each day there was observed data
 
 ```{r}
-post_pred_address <- paste0("ww_paper-1/vignettes3/posterior_predictive_scenario",
+post_pred_address <- paste0("ww_paper-1/vignettes/posterior_predictive_scenario",
                             sim,
                             "_seed",
                             seed,
@@ -214,7 +214,7 @@ my_theme <- list(
 eirrc_realdata_rt_plot_seed1 <- rt_quantiles_eirr %>%
   ggplot(aes(date, value, ymin = .lower, ymax = .upper)) +
   geom_lineribbon() +
-  scale_y_continuous("Rt", label = comma, breaks = seq(0.6, 1.4, by = 0.2), limits = c(0.6,1.4)) +
+  scale_y_continuous("Rt", label = comma, breaks = seq(0.4, 1.8, by = 0.2), limits = c(0.4,1.8)) +
   scale_x_date(name = "Date", date_breaks = "month") +
   ggtitle("EIRR-ww Posterior Rt") +
   my_theme + 
