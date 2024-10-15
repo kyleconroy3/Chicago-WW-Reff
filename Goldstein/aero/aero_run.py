@@ -19,4 +19,8 @@ def aero_run(input_data, n_samples: int, n_chains: int, n_reps: int,
     return [AeroOutput(name=name, path=path) for name, path in outputs.items()]
 
 
-print(register_function(aero_run))
+import os
+if os.getenv('GLOBUS_COMPUTE_CLIENT_ID') is None:
+    print("GLOBUS_COMPUTE_CLIENT_ID is not defined")
+else:
+    print(register_function(aero_run))
