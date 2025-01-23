@@ -1,0 +1,233 @@
+---
+title: "Aggregate Wastewater R Code"
+output: html_document
+date: "2025-01-23"
+---
+
+```{r}
+rm(list=ls())
+library(readr)
+library(tidyverse)
+library(tidybayes)
+library(posterior)
+library(fs)
+library(GGally)
+library(gridExtra)
+library(cowplot)
+library(scales)
+library(dplyr)
+```
+
+```{r}
+###################################################
+#Overall Aggregate - Sewershed and Pumping Station
+###################################################
+
+#Step 0: Importing of Goldstein Outputs from each of the wastewater sites 
+
+#1. Creating a combined data set with Goldstein outputs from each of the individual WW sites
+overalloverlap_combined <- bind_rows(
+  nbranchdata %>% mutate(plot = "Northbranch"),
+  racine  %>% mutate(plot = "Racine"),
+  onetwofivestdata %>% mutate(plot = "125st PS"),
+  lvdata %>% mutate(plot = "Lakeview/Uptown"),
+  norwooddata %>% mutate(plot = "Norwood"),
+  lincolndata %>% mutate(plot = "Lincoln"),
+  chathamdata %>% mutate(plot = "Chatham"),
+  chicagodata %>% mutate(plot = "Chicago Lawn"),
+  austindata %>% mutate(plot = "Austin Lawn"),
+  wpullmandata %>% mutate(plot = "West Pullman"),
+  littlevillagedata %>% mutate(plot = "Little Village")
+)
+
+Sewershed_combined2 <- overalloverlap_combined
+Sewershed_combined2$population <- "."
+
+##2. Defining Population Sizes of each Catchment area
+
+popnorwood<- 23324
+poplincoln <- 24099
+poplakeview <- 54362
+popaustin <- 83455
+popchilawn <- 77799
+popchatham <- 3816
+popwestpullman <- 23475
+poplittlevillage <- 29370
+popracine <- 467536
+popnorthbranch <- 721207
+pop125st <- 125995
+
+Sewershed_combined2$population[Sewershed_combined2$plot == "Norwood"] <- popnorwood
+Sewershed_combined2$population[Sewershed_combined2$plot == "Lincoln"] <- poplincoln
+Sewershed_combined2$population[Sewershed_combined2$plot == "Lakeview/Uptown"] <- poplakeview
+Sewershed_combined2$population[Sewershed_combined2$plot == "Austin Lawn"] <- popaustin
+Sewershed_combined2$population[Sewershed_combined2$plot == "Chicago Lawn"] <- popchilawn
+Sewershed_combined2$population[Sewershed_combined2$plot == "Chatham"] <- popchatham
+Sewershed_combined2$population[Sewershed_combined2$plot == "West Pullman"] <- popwestpullman
+Sewershed_combined2$population[Sewershed_combined2$plot == "Little Village"] <- poplittlevillage
+Sewershed_combined2$population[Sewershed_combined2$plot == "Racine"] <- popracine
+Sewershed_combined2$population[Sewershed_combined2$plot == "Northbranch"] <- popnorthbranch
+Sewershed_combined2$population[Sewershed_combined2$plot == "125st PS"] <- pop125st 
+
+
+Sewershed_combined2$numdate <- as.numeric(Sewershed_combined2$date)
+Sewershed_combined2$value <- as.numeric(Sewershed_combined2$value)
+Sewershed_combined2$population <- as.numeric(Sewershed_combined2$population)
+
+##3. Population Weighting of Estimates
+  #Re = [Sum(Rww(i)*Pop(i))] / Sum(Pop(i))
+  #Re = [Sum(value(i)*Pop(i))] / Sum(Pop(i))
+
+Sewershed_ensemble <- Sewershed_combined2 %>%
+  group_by(numdate) %>%
+  summarise(
+    Re = sum(value * population) / sum(population)
+  )
+
+Sewershed_ensemble$numdate <- as.Date(Sewershed_ensemble$numdate)
+
+#Sample plot of weighted estimates
+ ggplot(Sewershed_ensemble, aes(x = numdate, y = Re)) +
+  geom_line(size=1) +
+  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 1.6)) +
+  scale_x_date(name = "Date", date_breaks = "month") +
+  ggtitle("Ensemble") +
+  my_theme +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1) +
+  geom_smooth(method = "loess", color = "blue", size = 2, se = FALSE, span = 0.1) +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = c(0.95, 0.8),
+        text = element_text(size = 8),
+        legend.background = element_blank())
+ 
+ 
+
+Sewershed_ensemble_clean <- Sewershed_ensemble[!is.na(Sewershed_ensemble$numdate) & 
+                                               !is.na(Sewershed_ensemble$Re) &
+                                               !is.infinite(Sewershed_ensemble$numdate) &
+                                               !is.infinite(Sewershed_ensemble$Re) &
+                                               !is.nan(Sewershed_ensemble$numdate) &
+                                               !is.nan(Sewershed_ensemble$Re), ]
+
+Sewershed_ensemble_clean$numdate <- as.numeric(Sewershed_ensemble_clean$numdate)
+Sewershed_ensemble_clean$Re <- as.numeric(Sewershed_ensemble_clean$Re)
+
+#4. Smoothing of the Aggregated Estimates
+loess_model <- loess(Re ~ numdate, data = Sewershed_ensemble_clean, span = 0.1)  
+
+fitted_values <- predict(loess_model)
+
+smoothed_data <- data.frame(numdate = Sewershed_ensemble_clean$numdate, Re = Sewershed_ensemble_clean$Re, smoothed_Re = fitted_values)
+ 
+smoothed_data$numdate <- as.Date(smoothed_data$numdate)
+
+#5. Plotting Smoothed Aggregate Estimates (no CIs)
+ ggplot(smoothed_data, aes(x = numdate, y = smoothed_Re)) +
+  geom_line(size=1.5, col="red") +
+  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 1.6)) +
+  scale_x_date(name = "Date", date_breaks = "month") +
+  ggtitle("Ensemble") +
+  my_theme +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1) +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = c(0.95, 0.8),
+        text = element_text(size = 8),
+        legend.background = element_blank())
+ 
+
+ 
+#6. Prepping Data set for creating CI for the aggregated estimates
+Sewershed_combined3 <- Sewershed_combined2
+Sewershed_combined3 <- subset(Sewershed_combined3, .width == 0.95) #Looking at 95% CIs
+Sewershed_combined3$numdate <- as.Date(Sewershed_combined3$numdate)
+smoothed_data$numdate <- as.Date(smoothed_data$numdate)
+df_updated <- merge(Sewershed_combined3, smoothed_data, by = "numdate", all.x = TRUE)
+
+CIdata <- df_updated
+
+#7. Calculate standard deviation from CI for each site-date pair
+CIdata$std_dev <- (CIdata$.upper - CIdata$.lower) / 3.92
+
+
+#Function to compute mean and standard deviation for each date
+compute_agg_estimate <- function(CIdata) {
+  weights <- 1 / (CIdata$std_dev^2)
+  agg_mean <- sum(weights * CIdata$smoothed_Re) / sum(weights)
+  agg_variance <- 1 / sum(weights)
+  agg_std_dev <- sqrt(agg_variance)
+  
+  return(data.frame(agg_mean = agg_mean, agg_std_dev = agg_std_dev))
+}
+
+library(dplyr)
+agg_estimates3 <- CIdata %>%
+  group_by(numdate) %>%
+  do(as.data.frame(compute_agg_estimate(.))) %>%
+  ungroup()
+
+# Calculate 95% CI for each date's county-level estimate
+agg_estimates3$ci_lower <- agg_estimates3$agg_mean - 1.96 * agg_estimates3$agg_std_dev
+agg_estimates3$ci_upper <- agg_estimates3$agg_mean + 1.96 * agg_estimates3$agg_std_dev
+
+#Plot looking at the CIs created
+aggregate_CI3 <- ggplot(agg_estimates3, aes(x = numdate, y = agg_mean)) +
+  geom_line(size=1.5, col="red") +
+  geom_ribbon(aes(ymax = ci_upper, ymin = ci_lower), 
+              alpha = 0.4, color = "NA", fill="red") +
+  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 1.6)) +
+  scale_x_date(name = "Date", date_breaks = "month") +
+  theme_minimal() +
+  ggtitle("Sewershed Aggregate Estimates with 95% Confidence Intervals") +
+  my_theme +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1)
+
+agg_estimates3 <- na.omit(agg_estimates3)
+aggregate_CI3
+
+#8. Reformatting the Data to fit the Huisman plotting code
+agg_estimates4 <- agg_estimates3
+agg_estimates4$.lower <- agg_estimates4$ci_lower
+agg_estimates4$.upper <- agg_estimates4$ci_upper
+agg_estimates4$value <- agg_estimates4$agg_mean
+agg_estimates4$date <- agg_estimates4$numdate
+
+agg_estimates4$date <- as.numeric(agg_estimates4$date)
+
+#9. Smoothing The Data
+spline_lower <- smooth.spline(agg_estimates4$date, agg_estimates4$ci_lower)
+spline_upper <- smooth.spline(agg_estimates4$date, agg_estimates4$ci_upper)
+
+agg_estimates4$ci_lower <- predict(spline_lower, agg_estimates4$date)$y
+agg_estimates4$ci_upper <- predict(spline_upper, agg_estimates4$date)$y
+
+#view the smoothed estimates
+head(agg_estimates4)
+agg_estimates4$date <- as.Date(agg_estimates4$date)
+
+#10. Plotting aggregate estimates with CI's
+aggregate_CI4 <- ggplot(agg_estimates4, aes(x = numdate, y = agg_mean)) +
+  geom_line(size=1.5, col="red") +
+  geom_ribbon(aes(ymax = ci_upper, ymin = ci_lower), 
+              alpha = 0.4, color = "NA", fill="red") +
+  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 1.6)) +
+  scale_x_date(name = "Date", date_breaks = "month") +
+  theme_minimal() +
+  ggtitle("Sewershed Aggregate Estimates with 95% Confidence Intervals") +
+  my_theme +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1)
+aggregate_CI4
+
+combined_plot <- ggplot(Sewershed_combined, aes(x = date, y = value, ymin = .lower, ymax = .upper, color="plot")) +
+  geom_line(size=1) +
+  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 2.0)) +
+  scale_x_date(name = "Date", date_breaks = "month") +
+  ggtitle("Sewershed combined Rt") +
+  my_theme +
+  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1) +
+  scale_color_manual(values = colors) +  # Add this line for custom colors
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = c(0.95, 0.8),
+        text = element_text(size = 8),
+        legend.background = element_blank())
+```
+
