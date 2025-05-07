@@ -9,7 +9,6 @@ def transform(output: str):  # -> AeroOutput
     # load input
     odata = pd.read_csv(output)
 
-    # keep relevant info, rename
     odata = odata.loc[
         odata.method != 0, ["sars_cov_2", "sample_collect_date"]
     ].reset_index(drop=True)
@@ -19,26 +18,15 @@ def transform(output: str):  # -> AeroOutput
     reference_date = pd.Timestamp("1970-01-01")
     odata["date"] = pd.to_datetime(odata["date"])
     odata["num_date"] = (odata["date"] - reference_date).dt.days
-
-    # assign year
     odata["year"] = np.nan
-    odata.loc[odata["num_date"] < 19358, "year"] = 2022
-    odata.loc[(odata["num_date"] >= 19358) & (odata["num_date"] < 19724), "year"] = 2023
-    odata.loc[odata["num_date"] >= 19724, "year"] = 2024
+    odata["year"] = odata["date"].dt.year.astype(np.float32)
 
-    # calculate yearday and time
-    odata["yearday"] = odata["num_date"]
-    odata.loc[odata["year"] == 2022, "yearday"] = (
-        odata.loc[odata["year"] == 2022, "num_date"] - (52 * 365) - 12
-    )
-    odata.loc[odata["year"] == 2023, "yearday"] = (
-        odata.loc[odata["year"] == 2023, "num_date"] - (53 * 365) - 12
-    )
-    odata.loc[odata["year"] == 2024, "yearday"] = (
-        odata.loc[odata["year"] == 2024, "num_date"] - (54 * 365) - 12
-    )
+    odata["yearday"] =  odata["date"].dt.day_of_year
 
-    odata["year_day"] = odata["num_date"] - (52 * 365) - 12
+    # days since first day of 2022
+    ts_2022 = pd.Timestamp("2022-01-01")
+    # not 0 based
+    odata["year_day"] = (odata["date"] - ts_2022).dt.days + 1
     odata['new_time'] = odata['year_day'] - (odata['year_day'].iloc[0] - 1)
 
     # calculate values
@@ -48,8 +36,8 @@ def transform(output: str):  # -> AeroOutput
     odata["epi_week2"] = (odata["yearday"] - 1) / 7 + 1
     odata["epi_week"] = np.floor(odata["epi_week2"])
 
+    # foo
     odata.to_csv(output, index=False)
     return AeroOutput(name="output", path=output)
-
 
 print(register_function(transform))
