@@ -3,6 +3,7 @@ module ww_paper
 
 using Distributions
 using Turing
+using DynamicPPL
 using AxisArrays
 using MCMCChains
 using Optim

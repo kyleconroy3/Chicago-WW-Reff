@@ -3,6 +3,7 @@ from aero_client.utils import register_function
 
 def aero_run(input_data, n_samples: int, n_chains: int, n_reps: int,
              root_path, n_threads: int):
+    """Run the wastewater harness"""
     import os
     import sys
     from aero_client.utils import AeroOutput
