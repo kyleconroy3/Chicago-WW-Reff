@@ -217,17 +217,18 @@ aggregate_CI4 <- ggplot(agg_estimates4, aes(x = numdate, y = agg_mean)) +
   geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1)
 aggregate_CI4
 
-combined_plot <- ggplot(Sewershed_combined, aes(x = date, y = value, ymin = .lower, ymax = .upper, color="plot")) +
-  geom_line(size=1) +
-  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 2.0)) +
+combined_plot <- ggplot(agg_estimates4, aes(x = numdate, y = agg_mean)) +
+  geom_line(size = 1.5, col = "red") +
+  geom_line(data = odata, aes(x = date, y = value), col = "blue", size = 0.8) +
+  geom_line(data = cdata, aes(x = date, y = value), col = "black", size = 0.8) +
+  geom_ribbon(aes(ymax = ci_upper, ymin = ci_lower), 
+              alpha = 0.5, color = NA, fill = "red") +
+  scale_y_continuous("Rt", label = scales::comma, breaks = seq(0.6, 2.0, by = 0.2), limits = c(0.6, 1.6)) +
   scale_x_date(name = "Date", date_breaks = "month") +
-  ggtitle("Sewershed combined Rt") +
+  theme_minimal() +
+  ggtitle("Sewershed Aggregate Estimates with 95% Confidence Intervals") +
   my_theme +
-  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd=1) +
-  scale_color_manual(values = colors) +  # Add this line for custom colors
-  theme(axis.text.x = element_text(angle = 90),
-        legend.position = c(0.95, 0.8),
-        text = element_text(size = 8),
-        legend.background = element_blank())
+  geom_hline(yintercept = 1, linetype = "solid", color = "black", lwd = 1)
+combined_plot
 ```
 
