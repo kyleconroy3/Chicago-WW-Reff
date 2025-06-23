@@ -40,5 +40,4 @@ def transform(output: str):  # -> AeroOutput
     odata.to_csv(output, index=False)
     return AeroOutput(name="output", path=output)
 
-
 print(register_function(transform))
