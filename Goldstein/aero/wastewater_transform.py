@@ -21,7 +21,7 @@ def transform(output: str):  # -> AeroOutput
     odata["year"] = np.nan
     odata["year"] = odata["date"].dt.year.astype(np.float32)
 
-    odata["yearday"] =  odata["date"].dt.day_of_year
+    odata["yearday"] = odata["date"].dt.day_of_year
 
     # days since first day of 2022
     ts_2022 = pd.Timestamp("2022-01-01")
@@ -31,7 +31,7 @@ def transform(output: str):  # -> AeroOutput
 
     # calculate values
     odata["sum_genes"] = odata["gene_copy"]
-    odata["log_gene_copies"] = np.log10(odata["gene_copy"])
+    odata["log_gene_copies"] = np.where(odata["gene_copy"] == 0, 0, np.log10(odata["gene_copy"]))
 
     odata["epi_week2"] = (odata["yearday"] - 1) / 7 + 1
     odata["epi_week"] = np.floor(odata["epi_week2"])
@@ -39,5 +39,6 @@ def transform(output: str):  # -> AeroOutput
     # foo
     odata.to_csv(output, index=False)
     return AeroOutput(name="output", path=output)
+
 
 print(register_function(transform))
