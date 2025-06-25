@@ -1,7 +1,9 @@
 from aero_client.utils import register_function
 
 
-def transform(output: str):  # -> AeroOutput
+def transform(site_name: str, output: str):  # -> AeroOutput
+    # site_name not used - only here as input so we can
+    # resuse this function with different sites
     import pandas as pd
     import numpy as np
     from aero_client.utils import AeroOutput
@@ -39,5 +41,6 @@ def transform(output: str):  # -> AeroOutput
     # foo
     odata.to_csv(output, index=False)
     return AeroOutput(name="output", path=output)
+
 
 print(register_function(transform))

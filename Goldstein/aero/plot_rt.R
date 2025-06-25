@@ -82,8 +82,11 @@ run <- function(cfg) {
   rt_quantiles_eirr <- posterior_timevarying_quantiles %>%
     filter(name == "rt_t_values") %>%
     left_join(date_week_crosswalk, by = "time") %>%
-    dplyr::select(time, date, epi_week, value, .lower, .upper, .width,.point, .interval) 
-  
+    dplyr::select(time, date, epi_week, value, .lower, .upper, .width,.point, .interval)
+  rds_fname <- paste0(cfg$out_dir, "/", cfg$rt_quantiles_name)
+  saveRDS(rt_quantiles_eirr, rds_fname)
+  # write.csv(rt_quantiles_eirr, rds_fname, row.names=F)
+
   my_theme <- list(
     scale_fill_brewer(name = "Credible Interval Width",
                       labels = ~percent(as.numeric(.))),

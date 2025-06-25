@@ -1,8 +1,8 @@
 from aero_client.utils import register_function
 
 
-def aero_run(input_data, n_samples: int, n_chains: int, n_reps: int,
-             root_path, n_threads: int):
+def aero_run(waste_water_data, n_samples: int, n_chains: int, n_reps: int,
+             root_path, waste_water_site: str, n_threads: int):
     """Run the wastewater harness"""
     import os
     import sys
@@ -14,7 +14,9 @@ def aero_run(input_data, n_samples: int, n_chains: int, n_reps: int,
     sys.path.append(aero_path)
 
     import wastewater_harness
-    cfg = wastewater_harness.run(n_samples, n_chains, n_reps, root_path, n_threads, input_data)
+    cfg = wastewater_harness.run(n_samples, n_chains, n_reps, root_path, n_threads,
+                                 waste_water_site, waste_water_data)
+    print("3")
     outputs = cfg["outputs"]
 
     return [AeroOutput(name=name, path=path) for name, path in outputs.items()]

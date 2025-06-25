@@ -10,7 +10,7 @@ PathLike = Union[str, bytes, os.PathLike]
 
 def write_cfg(cfg: Dict):
     out_dir = cfg['out_dir']
-    cfg_file = os.path.join(out_dir, f"cfg_{cfg['ts']}.yaml")
+    cfg_file = os.path.join(out_dir, f"cfg_{cfg['waste_water_site']}_{cfg['ts']}.yaml")
     with open(cfg_file, 'w') as f_out:
         yaml.safe_dump(cfg, f_out)
     return cfg_file
@@ -61,7 +61,8 @@ def run_rt_plot(plot_r: PathLike, cfg: Dict, cfg_file: PathLike):
         raise ValueError(res.stderr)
 
     cfg["outputs"]['rt_plot'] = expected_plot
-    # store_output(expected_plot, 'waster png plot', sources)
+    rt_quantiles_eirr = os.path.join(cfg["out_dir"], cfg["rt_quantiles_name"])
+    cfg["outputs"]["rt_quantiles_eirr"] = rt_quantiles_eirr
 
 
 def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
@@ -75,7 +76,8 @@ def run_goldstein(goldstein_jl: PathLike, cfg_file: PathLike):
         raise ValueError(f'{e.cmd}\n{e.stdout}\n{e.stderr}')
 
 
-def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threads: int, input_path: str = None):
+def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threads: int, waste_water_site: str,
+        input_path: str = None):
     os.environ['JULIA_NUM_THREADS'] = str(n_threads)
     goldstein_jl = str(Path(root_path, 'Goldstein', 'aero', 'goldstein_dp.jl'))
     plot_r = str(Path(root_path, 'Goldstein', 'aero', 'plot_rt.R'))
@@ -87,20 +89,22 @@ def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threa
     now = datetime.datetime.now()
     ts = now.strftime('%Y%m%d_%H%M%S')
     cfg = {
-        'ts': ts,
-        'root_path': root_path,
-        'out_dir': str(out_path),
-        'sim': 'real',
-        'seed': 1,
-        'rt_plot_name': f'rt_plot_{ts}.png',
-        'n_samples': n_samples,
-        'n_chains': n_chains,
-        'n_reps': n_reps,
-        'waste_water_r': waste_water_r,
-        'gen_quants_filename': f'generated_quantities_{ts}.csv',
-        'post_pred_filename': f'posterior_predictive_{ts}.csv',
-        'posterior_df_filename': f'posterior_df_{ts}.csv',
-        'outputs': {}
+        "ts": ts,
+        "root_path": root_path,
+        "out_dir": str(out_path),
+        "sim": "real",
+        "seed": 1,
+        "rt_plot_name": f"{waste_water_site}_rt_plot_{ts}.png",
+        "n_samples": n_samples,
+        "n_chains": n_chains,
+        "n_reps": n_reps,
+        "waste_water_r": waste_water_r,
+        "gen_quants_filename": f"{waste_water_site}_generated_quantities_{ts}.csv",
+        "post_pred_filename": f"{waste_water_site}_posterior_predictive_{ts}.csv",
+        "posterior_df_filename": f"{waste_water_site}_posterior_df_{ts}.csv",
+        "rt_quantiles_name": f"{waste_water_site}_rt_quantiles_{ts}.rds",
+        "waste_water_site": waste_water_site,
+        "outputs": {},
     }
 
     stage_data(cfg, input_path)
@@ -112,8 +116,9 @@ def run(n_samples: int, n_chains: int, n_reps: int, root_path: PathLike, n_threa
 
 
 if __name__ == '__main__':
+    import sys
     n_samples = 10
     n_chains = 2
 
     root_path = '/lcrc/project/EMEWS/bebop-2.0/ncollier/repos/Chicago-WW-Reff'
-    run(n_samples, n_chains, 10, root_path, 10)
+    run(n_samples, n_chains, 10, root_path, 10, sys.argv[1], sys.argv[2])
