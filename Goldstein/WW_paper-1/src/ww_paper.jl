@@ -198,7 +198,7 @@ function varnames_to_ranges end
 
 varnames_to_ranges(model::DynamicPPL.Model) = varnames_to_ranges(DynamicPPL.VarInfo(model))
 varnames_to_ranges(varinfo::DynamicPPL.UntypedVarInfo) = varnames_to_ranges(varinfo.metadata)
-function varnames_to_ranges(varinfo::DynamicPPL.TypedVarInfo)
+function varnames_to_ranges(varinfo::DynamicPPL.NTVarInfo)
     offset = 0
     dicts = map(varinfo.metadata) do md
         vns2ranges = varnames_to_ranges(md)
